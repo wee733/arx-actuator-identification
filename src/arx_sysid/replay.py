@@ -16,6 +16,10 @@ import numpy as np
 
 from .data import ARM_JOINTS, ArmCapture
 from .greybox import Inertia
+
+# MuJoCo's mjMINIMP / mjMAXIMP.
+MIN_IMPEDANCE = 0.0001
+MAX_IMPEDANCE = 0.9999
 from .plant import arm_xml, make_builder, mass_matrix
 
 
@@ -24,6 +28,24 @@ def coupled_arm_xml(source: str | Path, params: dict, pose: list[float], physics
     free = {j + 1: {"damping": 0.0, "armature": params["armature"][j],
                     "frictionloss": params["friction"][j]} for j in range(ARM_JOINTS)}
     return arm_xml(source, free, pose, physics_dt, name="R5a_coupled_identification")
+
+
+def set_friction_impedance(model: newton.Model, solver: SolverMuJoCo, impedance) -> None:
+    """Set the frictionloss constraint's solimp d0, per joint or for all joints.
+
+    MuJoCo's frictionloss rows are regularised by their own solref/solimp, so the
+    default d0 = 0.9 lets a loaded joint creep towards its target. d0 -> 1 removes
+    the regularisation and the constraint becomes close to hard Coulomb friction.
+    """
+    impedance = np.broadcast_to(np.asarray(impedance, dtype=np.float64), (ARM_JOINTS,))
+    if np.any(impedance < 0.0) or np.any(impedance >= 1.0):
+        raise ValueError("friction impedance d0 must lie in [0, 1)")
+    values = model.mujoco.solimpfriction.numpy()
+    # Zero marks a friction-free joint and keeps MuJoCo's default; MuJoCo clamps
+    # solimp to [mjMINIMP, mjMAXIMP], so an identified value is clamped the same way.
+    values[:, 0] = np.where(impedance > 0.0, np.clip(impedance, MIN_IMPEDANCE, MAX_IMPEDANCE), values[:, 0])
+    model.mujoco.solimpfriction.assign(values)
+    solver.notify_model_changed(newton.ModelFlags.JOINT_DOF_PROPERTIES)
 
 
 def arm_inertia(source: str | Path, pose: list[float], physics_dt: float, step: float = 0.02) -> Inertia:
@@ -46,6 +68,7 @@ def replay(capture: ArmCapture, params: dict, source: str | Path, pose: list[flo
     model = make_builder(xml, dofs=ARM_JOINTS).finalize(device="cpu")
     solver = SolverMuJoCo(model, use_mujoco_cpu=True, integrator="implicitfast",
                           disable_contacts=True, disable_sensors=True)
+    set_friction_impedance(model, solver, params["friction_impedance"])
     state, following = model.state(), model.state()
     control = model.control()
     state.joint_q.assign(capture.q[0].astype(np.float32))
@@ -55,7 +78,7 @@ def replay(capture: ArmCapture, params: dict, source: str | Path, pose: list[flo
     substeps = round(sample_dt / physics_dt)
     fine_t = np.arange(len(capture.t) * substeps) * physics_dt
     command = np.stack([np.interp(fine_t, capture.t, capture.command[:, j])
-                        for j in range(ARM_JOINTS)], axis=1)
+                        for j in range(ARM_JOINTS)], axis=1) + np.asarray(params["bias"])
     delay = np.asarray(params["delay_ticks"], dtype=int)
     kp, kd = np.asarray(params["kp"]), np.asarray(params["kd"])
     effort = np.asarray(params["effort"])

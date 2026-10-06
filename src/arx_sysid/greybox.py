@@ -14,9 +14,9 @@ Each tick of the differentiable reduced model is
 
 with M(q) expanded to first order about the capture pose plus armature, c the
 matching Coriolis/centrifugal terms, and f MuJoCo's soft frictionloss
-constraint (same regulariser and reference acceleration as the solver's default
-solref/solimp). It is only used for gradients; official Newton/MuJoCo replays
-score the result.
+constraint (same regulariser and reference acceleration as the solver, with the
+solimp d0 identified). q_cmd carries an optional constant per-joint bias. It is
+only used for gradients; official Newton/MuJoCo replays score the result.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from torch import nn
 
 from .data import ARM_JOINTS, ArmCapture
 
-PARAMETERS = ("kp", "kd", "delay_s", "armature", "friction")
+PARAMETERS = ("kp", "kd", "delay_s", "armature", "friction", "friction_impedance", "bias")
 
 
 @dataclass
@@ -107,15 +107,16 @@ class Inertia:
     at_zero: np.ndarray
 
 
-# MuJoCo defaults for a dof frictionloss row: solref (timeconst, dampratio) and
-# the impedance at zero violation / its width limit from solimp.
+# MuJoCo defaults for a dof frictionloss row: solref timeconst, solimp d0 (the
+# impedance at zero violation, identified as friction_impedance) and its width
+# limit d1. Only d0 is fitted, since it is what sets the stiction band.
 FRICTION_TIMECONST = 0.02
 FRICTION_IMPEDANCE = 0.9
 FRICTION_IMPEDANCE_MAX = 0.95
 
 
 class GreyBoxArm(nn.Module):
-    """Per-joint IdealPD + command delay + armature + Coulomb friction on a coupled arm."""
+    """Per-joint IdealPD + command delay and bias + armature + soft Coulomb friction on a coupled arm."""
 
     def __init__(self, inertia: Inertia, kp, kd, delay_s, armature, friction, effort,
                  physics_dt: float, max_delay_s: float, trainable: set[str],
@@ -140,14 +141,26 @@ class GreyBoxArm(nn.Module):
         for name, value in initial.items():
             raw = torch.log(as_tensor(value) + self.floor.get(name, 0.0))
             self.register_parameter(f"log_{name}", nn.Parameter(raw, requires_grad=name in trainable))
+        # d0 = 1 would be a perfectly hard constraint; keep it strictly below.
+        self.impedance_logit = nn.Parameter(
+            torch.logit(as_tensor(np.full(ARM_JOINTS, FRICTION_IMPEDANCE))),
+            requires_grad="friction_impedance" in trainable)
         fraction = np.clip(np.asarray(delay_s, dtype=np.float64) / max_delay_s, 1e-4, 1 - 1e-4)
         self.delay_logit = nn.Parameter(torch.logit(as_tensor(fraction)),
                                         requires_grad="delay_s" in trainable)
         self.use_friction = "friction" in trainable or bool(np.any(np.asarray(friction) > 0))
+        # Constant offset between the commanded and the held joint position
+        # (encoder zero or residual gravity compensation), added to the target.
+        self.bias = nn.Parameter(torch.zeros(ARM_JOINTS, dtype=torch.float64), requires_grad="bias" in trainable)
 
     def value(self, name: str) -> torch.Tensor:
         if name == "delay_s":
             return torch.sigmoid(self.delay_logit) * self.max_delay_s
+        if name == "friction_impedance":
+            # MuJoCo clamps solimp to at most mjMAXIMP = 0.9999; mirror it.
+            return torch.sigmoid(self.impedance_logit).clamp(max=0.9999)
+        if name == "bias":
+            return self.bias
         return torch.exp(getattr(self, f"log_{name}")) - self.floor.get(name, 0.0)
 
     def parameters_dict(self) -> dict[str, list[float]]:
@@ -168,14 +181,15 @@ class GreyBoxArm(nn.Module):
         """Simulated encoder positions at the target sample times, (B, samples, 6)."""
         samples = windows.target.shape[1]
         ticks = samples * windows.substeps
-        command = self.delayed_command(windows, ticks)
+        command = self.delayed_command(windows, ticks) + self.bias
         armature = self.value("armature")
         friction = self.value("friction") if self.use_friction else torch.zeros_like(armature)
         invweight0 = torch.diagonal(torch.linalg.inv(self.inertia_zero + torch.diag(armature)))
         constants = dict(
             kp=self.value("kp"), kd=self.value("kd"), effort=self.effort,
             inertia=self.inertia + torch.diag(armature), gradient=self.inertia_gradient, pose=self.pose,
-            friction=friction, regulariser=(1 / FRICTION_IMPEDANCE - 1) * invweight0,
+            friction=friction,
+            regulariser=(1 / self.value("friction_impedance") - 1) * invweight0,
             reference_gain=2 / (FRICTION_IMPEDANCE_MAX * max(FRICTION_TIMECONST, 2 * self.physics_dt)),
             dt=self.physics_dt, iterations=self.friction_iterations if self.use_friction else 0,
         )

@@ -19,7 +19,7 @@ import yaml
 from .replay import arm_inertia, replay, rmse
 from .config import runtime_versions
 from .data import ARM_JOINTS, load_capture
-from .greybox import GreyBoxArm, make_windows, position_rmse
+from .greybox import FRICTION_IMPEDANCE, PARAMETERS, GreyBoxArm, make_windows, position_rmse
 
 JOINT_NAMES = [f"R5a_joint{j}" for j in range(1, ARM_JOINTS + 1)]
 
@@ -35,6 +35,7 @@ def baseline_params(cfg: dict) -> dict:
     return {"kp": [float(j["kp"]) for j in joints], "kd": [float(j["kd"]) for j in joints],
             "delay_ticks": delay_ticks, "delay_s": [d * physics_dt for d in delay_ticks],
             "armature": [0.0] * ARM_JOINTS, "friction": [0.0] * ARM_JOINTS,
+            "friction_impedance": [FRICTION_IMPEDANCE] * ARM_JOINTS, "bias": [0.0] * ARM_JOINTS,
             "effort": [float(j["tau_limit"]) for j in joints]}
 
 
@@ -101,11 +102,16 @@ def replay_job(cfg: dict, params: dict, run: str, joint: int, profile: str) -> d
 
 
 def pooled_rmse(records: list[dict]) -> dict:
-    """RMS over captures of the active joint and of the passive joints, in rad."""
+    """RMS over captures of the active joint, the passive joints and all joints, in rad.
+
+    Passive joints move only through inertial coupling and hold offsets; real-to-sim
+    has to reproduce them too, so model selection uses all joints.
+    """
     active = [r["rmse_rad"][r["joint"] - 1] for r in records]
     passive = [x for r in records for j, x in enumerate(r["rmse_rad"]) if j != r["joint"] - 1]
-    return {"active_rmse_rad": float(np.sqrt(np.mean(np.square(active)))),
-            "passive_rmse_rad": float(np.sqrt(np.mean(np.square(passive))))}
+    rms = lambda values: float(np.sqrt(np.mean(np.square(values))))
+    return {"active_rmse_rad": rms(active), "passive_rmse_rad": rms(passive),
+            "all_rmse_rad": rms(active + passive)}
 
 
 def summary(records: list[dict]) -> list[dict]:
@@ -122,7 +128,7 @@ def run_spread(fits: dict, name: str, runs: list[str]) -> dict:
     """
     single = [fits[(name, Path(r).parent.name)]["params"] for r in runs]
     spread = {}
-    for key in ("kp", "kd", "friction", "armature", "delay_ticks"):
+    for key in [k for k in PARAMETERS if k != "delay_s"] + ["delay_ticks"]:
         values = np.array([p[key] for p in single], dtype=float)
         scale = np.maximum(np.abs(values).mean(0), 1e-9)
         spread[key] = np.round(np.ptp(values, axis=0) / scale, 3).tolist()
@@ -130,9 +136,9 @@ def run_spread(fits: dict, name: str, runs: list[str]) -> dict:
 
 
 def select(variants: dict, scores: dict, tolerance: float) -> str:
-    """Simplest structure (config order) within `tolerance` of the best validation score."""
-    best = min(scores[name]["active_rmse_rad"] for name in variants)
-    return next(name for name in variants if scores[name]["active_rmse_rad"] <= best * (1 + tolerance))
+    """Simplest structure (config order) within `tolerance` of the best all-joint validation RMSE."""
+    best = min(scores[name]["all_rmse_rad"] for name in variants)
+    return next(name for name in variants if scores[name]["all_rmse_rad"] <= best * (1 + tolerance))
 
 
 def isaaclab_record(params: dict, cfg: dict) -> dict:
@@ -142,7 +148,12 @@ def isaaclab_record(params: dict, cfg: dict) -> dict:
                    "armature": params["armature"][j], "friction": params["friction"][j],
                    "effort_limit_sim": params["effort"][j],
                    "min_delay": params["delay_ticks"][j], "max_delay": params["delay_ticks"][j],
-                   "delay_s": params["delay_ticks"][j] * physics_dt}
+                   "delay_s": params["delay_ticks"][j] * physics_dt,
+                   # Not DelayedPDActuatorCfg fields: solimp d0 goes to the joint's
+                   # mjc:solimpfriction (Newton model.mujoco.solimpfriction[:, 0]); the
+                   # bias is added to the joint position target.
+                   "mjc_solimpfriction_d0": params["friction_impedance"][j],
+                   "target_bias_rad": params["bias"][j]}
             for j, name in enumerate(JOINT_NAMES)}
 
 
@@ -242,17 +253,19 @@ def identify(cfg: dict, output: Path) -> dict:
         "physics_dt": cfg["plant"]["physics_dt"], "delay_unit": "physics ticks of physics_dt",
         "plant": "fixed-base R5a, source inertia (identical to the B2arx USD), zero passive damping, "
                  "gravity neutral, Newton + MuJoCo implicitfast",
-        "friction_semantics": "MuJoCo/MJWarp dof frictionloss with default solref/solimp",
+        "friction_semantics": "MuJoCo/MJWarp dof frictionloss; solimp d0 is identified "
+                              "(see friction_impedance), solref keeps MuJoCo's default",
         "label_is_measured": False, "accepted_on_step_test": accepted,
         "joints": isaaclab_record(params, cfg),
         "action_contract": {"kp": params["kp"], "kd": params["kd"],
+                            "friction_impedance": params["friction_impedance"], "target_bias": params["bias"],
                             "delay_seconds": [t * cfg["plant"]["physics_dt"] for t in params["delay_ticks"]],
                             "armature": params["armature"], "friction": params["friction"]},
     }
     (output / "params.yaml").write_text(yaml.safe_dump(record, sort_keys=False))
     report = {
         "versions": versions, "selected": selected, "accepted_on_step_test": accepted,
-        "selection_metric": "pooled active-joint position RMSE on chirp validation blocks, official replay; "
+        "selection_metric": "pooled all-joint position RMSE on chirp validation blocks, official replay; "
                             "simplest structure within selection_tolerance of the best",
         "per_run_relative_spread": {name: run_spread(fits, name, runs) for name in variants},
         "chirp_validation": selection,

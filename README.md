@@ -79,25 +79,56 @@ All six joints are simulated together in a fixed-base, gravity-neutral arm
 with the source inertia and zero passive damping, the same plant the policy
 sees. Every 5 ms tick applies the Isaac Lab IdealPD law
 
-    tau = clip(kp * (q_cmd(t - delay) - q) - kd * qd, +-effort)
+    tau = clip(kp * (q_cmd(t - delay) + bias - q) - kd * qd, +-effort)
 
-with the command delay in physics ticks, plus joint `armature` and
-`frictionloss` (MuJoCo's soft dry friction, which is what Isaac Lab's
-`friction` field does on Newton). All six encoders are scored, so the inertial
-coupling between joints constrains the fit.
+with the command delay in physics ticks, plus MuJoCo dry friction
+(`frictionloss`). All six encoders are scored, so the inertial coupling
+between joints constrains the fit.
+
+Two details decide most of the accuracy:
+
+- **Friction stiffness.** MuJoCo enforces dry friction as a soft constraint.
+  With its default `solimp` d0 = 0.9 a loaded joint keeps creeping towards
+  its target, where the real gearbox stops dead. d0 is identified per joint
+  (`friction_impedance`); the data pushes it to 0.987–0.9997, i.e. close to
+  hard Coulomb friction. It is a per-dof MuJoCo parameter, so it carries over
+  to MJWarp on the GPU.
+- **Target bias.** Each joint holds a constant few-mrad offset from its
+  command regardless of the step direction (encoder zero or residual gravity
+  compensation). It is fitted as an offset added to the target.
+
+Armature is not fitted: position data cannot separate it from kp, kd and
+friction (see below).
 
 Gradients come from a differentiable reduced model (`greybox.py`): first-order
 inertia about the capture pose, the matching Coriolis terms, and MuJoCo's
-frictionloss solve. It matches the official Newton/MuJoCo replay to within
-0.1 mrad. Every reported score comes from the official replay
-(`replay.py`).
+frictionloss solve with the identified impedance. It matches the official
+Newton/MuJoCo replay to within 0.1 mrad, with default and stiff friction.
+Every reported score comes from the official replay (`replay.py`).
 
 Data use is fixed in advance: the first 70 % of each chirp fits parameters,
 the last 30 % selects among model structures (`pd`, `pd_friction`,
-`pd_friction_armature`; the simplest within 5 % of the best wins), and step
-captures are replayed once at the end as the test. A fit is only reported as
-accepted when every step trajectory is no worse than the baseline by more
-than 5 %.
+`pd_stiction`, `pd_stiction_bias`; the simplest within 5 % of the best
+all-joint RMSE wins), and step captures are replayed once at the end as the
+test. A fit is reported as accepted only when every step trajectory's
+active-joint RMSE is within 5 % of the baseline's.
+
+### Using the result in Isaac Lab / Newton
+
+`params.yaml` lists, per joint, the values for `DelayedPDActuatorCfg`
+(`stiffness`, `damping`, `friction`, `armature`, `effort_limit_sim`,
+`min_delay` = `max_delay` in physics ticks) and two values that config class
+does not carry:
+
+- `mjc_solimpfriction_d0`: set the joint's `mjc:solimpfriction` first element
+  in the USD, or `model.mujoco.solimpfriction[dof, 0]` followed by
+  `solver.notify_model_changed(ModelFlags.JOINT_DOF_PROPERTIES)`;
+- `target_bias_rad`: add it to the joint position target.
+
+Keep the simulation as identified: Newton with MuJoCo-Warp, `implicitfast`,
+a 5 ms step with one substep, explicit PD (not `ImplicitActuator`), the
+post-EMA command as the target, zero joint damping and armature, and gravity
+either disabled for the arm or compensated with the same model.
 
 ## 3. Calibrate current to torque (optional)
 

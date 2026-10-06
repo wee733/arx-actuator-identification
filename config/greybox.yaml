@@ -26,19 +26,24 @@ fit:
   iterations: 500
   delay_refit_iterations: 150
   learning_rate: 0.03
-  friction_iterations: 3
+  friction_iterations: 5
   threads_per_worker: 1
   initial_armature: 0.0001
   initial_friction: 0.01
-  # Candidate model structures; the chirp validation blocks pick one.
+  # Candidate model structures, simplest first; the chirp validation blocks pick one.
+  # friction_impedance is the frictionloss constraint's solimp d0: MuJoCo's 0.9
+  # lets a loaded joint creep, values near 1 hold it like real stiction.
+  # bias is a constant per-joint offset of the held position from the command
+  # (encoder zero or residual gravity compensation), applied to the target.
+  # Armature is not fitted: position data cannot separate it from kp/kd/friction.
   variants:
     pd: [kp, kd, delay_s]
     pd_friction: [kp, kd, delay_s, friction]
-    pd_friction_armature: [kp, kd, delay_s, friction, armature]
+    pd_stiction: [kp, kd, delay_s, friction, friction_impedance]
+    pd_stiction_bias: [kp, kd, delay_s, friction, friction_impedance, bias]
 validation:
-  # Variants are listed from simplest to richest. Armature trades off against
-  # kp/kd/friction when only positions are measured, so a richer structure must
-  # beat the simplest acceptable one by more than this fraction to be chosen.
+  # A richer structure must beat the simplest acceptable one by more than this
+  # fraction of the all-joint validation RMSE to be chosen.
   selection_tolerance: 0.05
   # Each held-out step trajectory must keep the active joint's position RMSE
   # within this ratio of the deployed baseline to accept a replacement.
