@@ -1,0 +1,53 @@
+# Python and local environments
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+.venv/
+venv/
+
+# Editor, agent and credential state
+.env
+.env.*
+*.pem
+*.key
+.vscode/
+.idea/
+.agents/
+.codex/
+.claude/
+CLAUDE.md
+AGENTS.md
+
+# Captures, fitted results and checkpoints stay local
+data/
+arx_id_data/
+identification_data/
+runs/
+outputs/
+*.npz
+*.npy
+*.pt
+*.pt2
+*.pth
+*.onnx
+*.log
+
+# Heavy or proprietary robot assets; the text MJCF is tracked
+**/meshes/
+legacy/arx_actuator_identification/my_robot/my_b2arx/
+*.usd
+*.usda
+*.usdc
+*.stl
+*.STL
+
+# Local-only tests and notes (owner's choice)
+/tests/
+/docs/
+*~
+*.swp

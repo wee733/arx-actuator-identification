@@ -1,0 +1,70 @@
+model: simple_pd_delay_filter_saturation
+command_input: q_cmd_smooth
+software_ema:
+  enabled: true
+  alpha_1khz_real: 0.05
+  tau_s: 0.01949572574622367
+gravity_compensation: false
+gravity_contract:
+  target: gravity_neutral_arm
+  isaac_feedforward: false
+  mujoco_feedforward: false
+  note: real firmware already compensates gravity; kp/kd identified with pure PD,
+    no feedforward.
+action_scale: 0.25
+default_joint_pos:
+- 0.0
+- 1.0
+- 0.8
+- 0.0
+- 0.0
+- 0.0
+joints:
+  R5a_joint1:
+    kp: 16.002533696088847
+    kd: 0.9653550775562955
+    delay_steps: 0
+    filter_alpha: 1.0
+    tau_limit: 64.0
+    tau_lag_alpha: 1.0
+    gravity_scale: 0.0
+  R5a_joint2:
+    kp: 26.66343352125888
+    kd: 1.898936300858176
+    delay_steps: 0
+    filter_alpha: 1.0
+    tau_limit: 64.0
+    tau_lag_alpha: 1.0
+    gravity_scale: 0.0
+  R5a_joint3:
+    kp: 31.72318363299385
+    kd: 2.4018660298707024
+    delay_steps: 4
+    filter_alpha: 1.0
+    tau_limit: 64.0
+    tau_lag_alpha: 1.0
+    gravity_scale: 0.0
+  R5a_joint4:
+    kp: 5.3742454192848506
+    kd: 0.18449434631628026
+    delay_steps: 1
+    filter_alpha: 1.0
+    tau_limit: 64.0
+    tau_lag_alpha: 1.0
+    gravity_scale: 0.0
+  R5a_joint5:
+    kp: 3.088030381518184
+    kd: 0.14579060361110824
+    delay_steps: 2
+    filter_alpha: 1.0
+    tau_limit: 64.0
+    tau_lag_alpha: 1.0
+    gravity_scale: 0.0
+  R5a_joint6:
+    kp: 4.858456866357783
+    kd: 0.04160561372766666
+    delay_steps: 8
+    filter_alpha: 1.0
+    tau_limit: 64.0
+    tau_lag_alpha: 1.0
+    gravity_scale: 0.0

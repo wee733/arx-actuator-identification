@@ -1,0 +1,51 @@
+# Coupled six-joint grey-box identification for the deployed Isaac Lab 3.0
+# Newton/MJWarp arm: IdealPD effort every 5 ms tick, command delay in ticks,
+# joint armature and frictionloss, zero passive damping, gravity neutral.
+schema_version: 1
+data:
+  runs:
+    - ../data/20260605_001412/csv
+    - ../data/20260611_201935/csv
+  command_source: smooth
+  sample_dt: 0.01
+  discard_start_s: 2.0
+  derivative_window: 15
+  derivative_polyorder: 3
+  train_fraction: 0.7
+  split_gap_s: 0.3
+plant:
+  source_xml: ../models/b2arx.xml
+  baseline: baselines/pd_20260605.yaml
+  fixed_pose: [0.0, 1.0, 0.8, 0.0, 0.0, 0.0]
+  physics_dt: 0.005
+  gravity: [0.0, 0.0, 0.0]
+fit:
+  window_s: 1.5
+  stride_s: 0.5
+  max_delay_s: 0.15
+  iterations: 500
+  delay_refit_iterations: 150
+  learning_rate: 0.03
+  friction_iterations: 3
+  threads_per_worker: 1
+  initial_armature: 0.0001
+  initial_friction: 0.01
+  # Candidate model structures; the chirp validation blocks pick one.
+  variants:
+    pd: [kp, kd, delay_s]
+    pd_friction: [kp, kd, delay_s, friction]
+    pd_friction_armature: [kp, kd, delay_s, friction, armature]
+validation:
+  # Variants are listed from simplest to richest. Armature trades off against
+  # kp/kd/friction when only positions are measured, so a richer structure must
+  # beat the simplest acceptable one by more than this fraction to be chosen.
+  selection_tolerance: 0.05
+  # Each held-out step trajectory must keep the active joint's position RMSE
+  # within this ratio of the deployed baseline to accept a replacement.
+  allowed_rmse_ratio: 1.05
+runtime:
+  python: '3.12'
+  newton: '1.6'
+  torch: '2.11'
+  warp: '1.17'
+  mujoco: '3.12'

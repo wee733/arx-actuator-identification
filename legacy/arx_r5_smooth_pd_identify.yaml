@@ -1,0 +1,64 @@
+# ARX R5a smooth-command actuator identification config.
+#
+# Intended use:
+#   - fit chirp data converted with --cmd-source smooth
+#   - identify the ARX firmware position-servo equivalent after the 1 kHz EMA
+#   - keep the known actuator effort limit fixed at 64 Nm
+#
+# Units:
+#   delay_steps/time_shift_steps are dataset sample steps. Current arm_id_collect
+#   logs at 100 Hz, so 1 step = 10 ms.
+
+# Search real residual delay after q_cmd_smooth. Include small values first; the
+# old default [5, 8, 10, 12, 15, 20] starts at 50 ms and is too coarse here.
+delay_steps_candidates: [0, 1, 2, 3, 4, 5, 8]
+
+# q_cmd_smooth already includes the real 1 kHz software EMA. Do not add a second
+# low-pass in the first pass.
+filter_alpha_candidates: [1.0]
+
+# time_shift is only a loss-alignment knob and is not exported to the actuator
+# YAML. Keep it fixed so the fit cannot rely on an undeployable clock offset.
+time_shift_candidates: [0]
+
+# No torque measurement is available, so torque-lag is not identifiable in the
+# first pass. Keep it disabled unless held-out step residuals demand it.
+tau_lag_alpha_candidates: [1.0]
+
+# Training-side arm gains are only 64/128, but the real firmware servo may be far
+# stiffer. Use a wide range and compare the result with training.
+kp_bounds: [0.1, 1000.0]
+kd_bounds: [0.0, 100.0]
+
+# ARX/Isaac contract uses effort_limit=64. The collected amplitudes are small, so
+# saturation cannot be reliably identified from data; lock it to the known value.
+tau_limit_bounds: [64.0, 64.0]
+
+# kd/kp 比值上界(过阻尼先验)。MuJoCo 粗拟合与 Isaac 精修共用此值，保证两阶段同空间搜索。
+# 历史辨识 kd/kp 实测 0.004~0.221、训练侧 0.0234，0.25 留了余量；若某关节阻尼明显更大可放开。
+max_kd_over_kp: 0.25
+
+# Position fit matters most. qd is computed by gradient(q,t), so give it a lower
+# weight to avoid fitting numerical velocity noise.
+w_q: 1.0
+w_qd: 0.25
+w_reg_kp: 0.0
+w_reg_tau: 0.0
+
+# 重力补偿:关闭(gravity_scale=0,纯 PD)。实测(2026-06-05)依据:
+#   - 真机 ARX 固件内置重力补偿 → 采集到的 q_real 是“重力中性”轨迹。
+#   - MuJoCo 用纯 PD 拟合 j2/j3/j4 的 q_rmse 比加 +G 好 6~17 倍(加 G 反而引入真机没有的下垂)。
+#   - Isaac articulation 也实测重力中性(probe)。三方一致:辨识不加 G。
+gravity_compensation: false
+gravity_scale_candidates: [0.0]
+w_reg_gravity_scale: 0.01
+
+random_seed: 42
+random_samples: 1000
+
+# Isaac coarse-to-fine 迭代精修：第 0 轮用 MuJoCo prior 邻域撒点，之后每轮以上轮 best
+# 为中心、半径收缩 refine_shrink 倍重撒。总候选预算由 --candidates-per-joint 控制，
+# 每轮约 candidates_per_joint / refinement_rounds 个。设 refinement_rounds=1 即旧单轮行为。
+refinement_rounds: 4
+refine_shrink: 0.5
+refine_candidates_per_round: null

@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "arx-sysid"
+version = "0.3.0"
+description = "Real-to-sim actuator identification for the ARX R5 arm on Newton / Isaac Lab"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "numpy", "scipy", "PyYAML", "matplotlib", "torch>=2.11,<2.12",
+  "newton==1.6.0", "warp-lang==1.17.0", "mujoco==3.12.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.scripts]
+arx-sysid = "arx_sysid.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

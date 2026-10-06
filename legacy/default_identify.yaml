@@ -1,0 +1,18 @@
+delay_steps_candidates: [5, 8, 10, 12, 15, 20]
+filter_alpha_candidates: [0.2, 0.4, 0.6, 0.8, 1.0]
+time_shift_candidates: [0, 2, 4, 6, 8, 10]
+tau_lag_alpha_candidates: [0.1, 0.2, 0.4, 1.0]
+kp_bounds: [0.1, 150.0]
+kd_bounds: [0.0, 50.0]
+tau_limit_bounds: [0.1, 10.0]
+w_q: 1.0
+w_qd: 1.0
+w_reg_kp: 0.00001
+w_reg_tau: 0.0001
+# 重力补偿默认关(纯 PD)：真机固件已补重力，q_real 是重力中性轨迹(实测 2026-06-05)。
+gravity_compensation: false
+gravity_scale_candidates: [0.0]
+w_reg_gravity_scale: 0.01
+random_seed: 42
+random_samples: 200
+refinement_rounds: 4
