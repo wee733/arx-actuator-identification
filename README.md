@@ -1,5 +1,20 @@
 # arx-sysid
 
+![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
+![Newton 1.6](https://img.shields.io/badge/Newton-1.6-76B900)
+![MuJoCo 3.12](https://img.shields.io/badge/MuJoCo-3.12-0077B6)
+![Warp 1.17](https://img.shields.io/badge/Warp-1.17-76B900)
+![PyTorch 2.11](https://img.shields.io/badge/PyTorch-2.11-EE4C2C?logo=pytorch&logoColor=white)
+![Real-to-sim](https://img.shields.io/badge/Actuator_identification-Real--to--sim-197B68)
+
+![Recorded joint positions versus official replay, aggregate error, and failed overall acceptance](media/readme/overview.png)
+
+*Historical experiment `20261007_greybox_v4`: measured ARX positions compared
+with the PD baseline and the selected `pd_stiction_bias` model. All-joint step
+RMSE improved from 5.40 to 2.40 mrad; 11/12 step trajectories passed, so overall
+acceptance remains **failed**. The J6 trace is one example; aggregate scores
+cover all six joints and both capture batches.*
+
 Real-to-sim actuator identification for the ARX R5 arm, aimed at policies
 trained in Isaac Lab 3.0 on Newton / MuJoCo-Warp. The repository covers the
 whole loop: collect excitation data on the robot, identify actuator
@@ -25,6 +40,7 @@ simulation model. See [What the parameters mean](#what-the-parameters-mean).
 | `legacy/` | Original single-joint PD identification, kept for reference only |
 
 Captures go in `data/<RUN_ID>/csv/`, results in `runs/`; neither is tracked.
+`media/readme/` contains only curated display figures for this README.
 
 ## 1. Collect on the robot
 
@@ -112,6 +128,33 @@ the last 30 % selects among model structures (`pd`, `pd_friction`,
 all-joint RMSE wins), and step captures are replayed once at the end as the
 test. A fit is reported as accepted only when every step trajectory's
 active-joint RMSE is within 5 % of the baseline's.
+
+### Representative validation and test results
+
+The figures below come from the historical `20261007_greybox_v4` run, using
+capture batches `20260605_001412` and `20260611_201935`. They show measured
+positions against official replay, with one row per active joint and one
+column per capture batch. These are existing experiment results, not a new
+identification run.
+
+![Chirp validation: commands, measured positions, baseline, and identified responses for six joints across two capture batches](media/readme/chirp_validation.png)
+
+*Chirp validation is used for model selection. The selected
+`pd_stiction_bias` model reduced all-joint RMSE from 5.45 to 2.37 mrad.*
+
+<details>
+<summary>Full held-out step test: all six joints, including the failed trajectory</summary>
+
+![Held-out step test: commands, measured positions, baseline, and identified responses for both capture batches](media/readme/step_test.png)
+
+*Step captures are the independent test. All-joint RMSE was 5.40 → 2.40 mrad,
+but first-batch J4 active-joint RMSE was 2.7733 → 2.9128 mrad (1.0503× the
+baseline), exceeding the 1.05× acceptance limit. Overall acceptance is false.*
+
+</details>
+
+Scores come from the run's local `report.yaml`; response curves come from its
+saved replay traces. Raw reports and captures remain local.
 
 ### Using the result in Isaac Lab / Newton
 

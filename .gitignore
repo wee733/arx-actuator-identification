@@ -51,3 +51,6 @@ legacy/arx_actuator_identification/my_robot/my_b2arx/
 /docs/
 *~
 *.swp
+
+# Local actuator-identification teaching website
+/docs/learning-site/
